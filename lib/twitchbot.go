@@ -2,6 +2,7 @@ package twitchbot
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,7 +134,9 @@ func (bot *Bot) Connect() {
 	var err error
 	fmt.Printf("|%s| Attempting to connect to %s on port %s\n", timeStamp(), bot.Server, bot.Port)
 
-	bot.conn, err = net.Dial("tcp", bot.Server+":"+bot.Port)
+	conf := &tls.Config{}
+	dialer := &net.Dialer{}
+	bot.conn, err = tls.DialWithDialer(dialer, "tcp", bot.Server+":"+bot.Port, conf)
 	if err != nil {
 		//TODO: retry should be incremental - https://dev.twitch.tv/docs/irc/guide
 		fmt.Println(err)
