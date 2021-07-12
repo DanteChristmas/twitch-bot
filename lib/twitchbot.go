@@ -6,17 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/textproto"
 	"os"
 	"regexp"
-	"strings"
 	"time"
 )
 
 type Keys struct {
 	Id     string `json:"client_id_bot"`
 	Secret string `json:"client_secret_bot"`
+	OAuth string `json:"oauth"`
 }
 
 type TokenResponse struct {
@@ -38,26 +37,30 @@ func (bot *Bot) ReadCredentials() error {
 	dec := json.NewDecoder(f)
 	dec.Decode(keys)
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("https://id.twitch.tv/oauth2/token?client_id=%s&client_secret=%s&grant_type=client_credentials&scopes=chat:read,chat:edit", keys.Id, keys.Secret), strings.NewReader(""))
-	if err != nil {
-		fmt.Printf("|%s| failed to build auth request", timeStamp())
-		return err
-	}
-	req.Header.Add("content-type", "application/json")
+//	req, err := http.NewRequest("POST", fmt.Sprintf("https://id.twitch.tv/oauth2/token?client_id=%s&client_secret=%s&grant_type=client_credentials&scopes=chat:read,chat:edit", keys.Id, keys.Secret), strings.NewReader(""))
+//	if err != nil {
+//		fmt.Printf("|%s| failed to build auth request", timeStamp())
+//		return err
+//	}
+//	req.Header.Add("content-type", "application/json")
+//
+//	var client http.Client
+//
+//	res, err := client.Do(req)
+//	if err != nil {
+//		bot.Disconnect()
+//		return errors.New("oauth token fetch failure")
+//	}
+//	defer res.Body.Close()
+//
+//	token := &TokenResponse{}
+//	json.NewDecoder(res.Body).Decode(token)
+//
+//	bot.Token = "oauth:" + token.Token
+//
 
-	var client http.Client
-
-	res, err := client.Do(req)
-	if err != nil {
-		bot.Disconnect()
-		return errors.New("oauth token fetch failure")
-	}
-	defer res.Body.Close()
-
-	token := &TokenResponse{}
-	json.NewDecoder(res.Body).Decode(token)
-
-	bot.Token = "oauth:" + token.Token
+	bot.Token = keys.OAuth
+	fmt.Println(bot.Token)
 
 	return nil
 }
