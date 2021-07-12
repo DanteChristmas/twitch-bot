@@ -1,0 +1,6 @@
+{
+  "channel": "dantechristmas_bot",
+  "name": "dantechristmas_bot",
+  "port": "6697",
+  "server": "irc.chat.twitch.tv"
+}
