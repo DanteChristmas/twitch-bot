@@ -114,6 +114,8 @@ func (bot *Bot) JoinChannel() {
 	logger.Log("joining #" + bot.Channel)
 	bot.conn.Write([]byte("PASS " + bot.Token + "\r\n"))
 	bot.conn.Write([]byte("NICK " + bot.Name + "\r\n"))
+	bot.conn.Write([]byte("CAP REQ :twitch.tv/commands\r\n"))
+	//bot.conn.Write([]byte("CAP REQ :twitch.tv/tags\r\n"))
 	bot.conn.Write([]byte("JOIN #" + bot.Channel + "\r\n"))
 
 
