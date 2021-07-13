@@ -22,8 +22,9 @@ type TwitchBot interface {
 	HandleChat() error
 	WatchChat()
 	JoinChannel()
-	setToken() error
+	SetToken() error
 	Say(msg string) error
+	Whisper(msg string, user string) error
 	Start()
 }
 
@@ -57,7 +58,7 @@ type Keys struct {
 	OAuth string `json:"oauth"`
 }
 
-func (bot *Bot) setToken() error {
+func (bot *Bot) SetToken() error {
 	f, err := os.Open(".keys.json")
 	if err != nil {
 		logger.Log("FATAL: filed to open keys files")
@@ -76,7 +77,7 @@ func (bot *Bot) setToken() error {
 }
 
 func (bot *Bot) Start() {
-	err := bot.setToken()
+	err := bot.SetToken()
 	if err != nil {
 		panic(err)
 	}
@@ -133,6 +134,20 @@ func (bot *Bot) Say(msg string) error {
 		return err
 	}
 	logger.Log(bot.Name + ": " + msg)  
+	return nil
+}
+
+func (bot *Bot) Whisper(username string, msg string) error {
+	logger.Log("attempting to whisper")
+	if msg == "" || username == "" {
+		return errors.New("must provide both a message and user to Whisper")
+	}
+
+	_, err := bot.conn.Write([]byte(fmt.Sprintf("PRIVMSG #%s :/w %s %s", bot.Channel, username, msg)))
+	if err != nil {
+		return err
+	}
+	logger.Log(fmt.Sprintf("%s: @%s %s", bot.Name, username, msg))
 	return nil
 }
 

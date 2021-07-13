@@ -33,6 +33,7 @@ func getConfig() *AppConfig {
 	return config
 }
 
+
 func main() {
 	config := getConfig()
 
@@ -49,6 +50,12 @@ func main() {
 	for {
 		time.Sleep(20 * time.Second)
 		err := bot.Say("test from bot")
+		if err != nil {
+			logger.Log("ERROR: bot.Say")
+			logger.Log(err.Error())
+		}
+		// fails right now
+		err = bot.Whisper("dantechristmas", "test from bot")
 		if err != nil {
 			logger.Log("ERROR: bot.Say")
 			logger.Log(err.Error())
