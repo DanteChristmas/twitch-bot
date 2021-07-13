@@ -45,4 +45,13 @@ func main() {
 	}
 
 	bot.Start()
+
+	for {
+		time.Sleep(20 * time.Second)
+		err := bot.Say("test from bot")
+		if err != nil {
+			logger.Log("ERROR: bot.Say")
+			logger.Log(err.Error())
+		}
+	}
 }

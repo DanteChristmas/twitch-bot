@@ -15,65 +15,14 @@ import (
 	"dchristmas.com/twitch-bot/lib/logger"
 )
 
-type Keys struct {
-	Id     string `json:"client_id_bot"`
-	Secret string `json:"client_secret_bot"`
-	OAuth string `json:"oauth"`
-}
-
-type TokenResponse struct {
-	Token     string `json:"access_token"`
-	Expires   int    `json:"expires_in"`
-	TokenType string `json:"token_type"`
-}
-
-func (bot *Bot) ReadCredentials() error {
-	f, err := os.Open(".keys.json")
-	if err != nil {
-		logger.Log("FATAL: failed to open keys files")
-		return err
-	}
-
-	keys := &Keys{}
-
-	defer f.Close()
-	dec := json.NewDecoder(f)
-	dec.Decode(keys)
-
-//	req, err := http.NewRequest("POST", fmt.Sprintf("https://id.twitch.tv/oauth2/token?client_id=%s&client_secret=%s&grant_type=client_credentials&scopes=chat:read,chat:edit", keys.Id, keys.Secret), strings.NewReader(""))
-//	if err != nil {
-//		fmt.Printf("|%s| failed to build auth request", timeStamp())
-//		return err
-//	}
-//	req.Header.Add("content-type", "application/json")
-//
-//	var client http.Client
-//
-//	res, err := client.Do(req)
-//	if err != nil {
-//		bot.Disconnect()
-//		return errors.New("oauth token fetch failure")
-//	}
-//	defer res.Body.Close()
-//
-//	token := &TokenResponse{}
-//	json.NewDecoder(res.Body).Decode(token)
-//
-//	bot.Token = "oauth:" + token.Token
-//
-
-	bot.Token = keys.OAuth
-	fmt.Println(bot.Token)
-
-	return nil
-}
 
 type TwitchBot interface {
 	Connect()
 	Disconnect()
 	HandleChat() error
+	WatchChat()
 	JoinChannel()
-	ReadCredentials() (string, error)
+	setToken() error
 	Say(msg string) error
 	Start()
 }
@@ -102,34 +51,40 @@ type Bot struct {
 	Server string
 }
 
-const TimeFormat = "Mon Jan 2 15:04:05 MST"
-
-func timeStamp() string {
-	return TimeStamp(TimeFormat)
+type Keys struct {
+	Id     string `json:"client_id_bot"`
+	Secret string `json:"client_secret_bot"`
+	OAuth string `json:"oauth"`
 }
 
-func TimeStamp(format string) string {
-	return time.Now().Format(format)
+func (bot *Bot) setToken() error {
+	f, err := os.Open(".keys.json")
+	if err != nil {
+		logger.Log("FATAL: filed to open keys files")
+		return err
+	}
+
+	keys := &Keys{}
+
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.Decode(keys)
+
+	bot.Token = keys.OAuth
+
+	return nil
 }
 
 func (bot *Bot) Start() {
-	err := bot.ReadCredentials()
+	err := bot.setToken()
 	if err != nil {
 		panic(err)
 	}
 
-	for {
-		bot.Connect()
-		bot.JoinChannel()
-		err = bot.HandleChat()
-		if err != nil {
-			time.Sleep(1000 * time.Millisecond)
-			logger.Log(err.Error())
-			logger.Log("restarting bot")
-		} else {
-			return
-		}
-	}
+	bot.Connect()
+
+	go bot.JoinChannel()
+	go bot.WatchChat()
 }
 
 func (bot *Bot) Connect() {
@@ -161,7 +116,22 @@ func (bot *Bot) JoinChannel() {
 	bot.conn.Write([]byte("NICK " + bot.Name + "\r\n"))
 	bot.conn.Write([]byte("JOIN #" + bot.Channel + "\r\n"))
 
+
 	logger.Log(fmt.Sprintf("joined #%s as @%s", bot.Channel, bot.Name))
+}
+
+func (bot *Bot) Say(msg string) error {
+	logger.Log("attempting to say")
+	if msg == "" {
+		return errors.New("must provide a message to Say")
+	}
+
+	_, err := bot.conn.Write([]byte(fmt.Sprintf("PRIVMSG #%s :%s\r\n", bot.Channel, msg)))
+	if err != nil {
+		return err
+	}
+	logger.Log(bot.Name + ": " + msg)  
+	return nil
 }
 
 // Regex for parsing PRIVMSG strings.
@@ -176,8 +146,18 @@ var msgRegex *regexp.Regexp = regexp.MustCompile(`^:(\w+)!\w+@\w+\.tmi\.twitch\.
 // command.
 var cmdRegex *regexp.Regexp = regexp.MustCompile(`^!(\w+)\s?(\w+)?`)
 
-func (bot *Bot) HandleChat() error {
+func (bot *Bot) WatchChat() {
 	logger.Log("watching " + bot.Channel)
+	for {
+		err := bot.HandleChat()
+		if err != nil {
+			logger.Log("FATAL: Handle Chat Error") 
+			logger.Log(err.Error())
+		}
+	}
+}
+
+func (bot *Bot) HandleChat() error {
 
 	tp := textproto.NewReader(bufio.NewReader(bot.conn))
 
