@@ -9,10 +9,11 @@ import (
 	"net"
 	"net/textproto"
 	"os"
-	"regexp"
 	"time"
 
 	"dchristmas.com/twitch-bot/lib/logger"
+	"dchristmas.com/twitch-bot/lib/ratelimiter"
+	"dchristmas.com/twitch-bot/lib/swanson"
 )
 
 
@@ -26,6 +27,9 @@ type TwitchBot interface {
 	Say(msg string) error
 	Whisper(msg string, user string) error
 	Start()
+	setLimiters()
+	ChatSwanson()
+	WhisperSwanson(name string)
 }
 
 type Bot struct {
@@ -50,13 +54,22 @@ type Bot struct {
 	PrivatePath string
 	//IRC Domain
 	Server string
+
+	ChannelLimiter *ratelimiter.Limiter
+	WhisperLimiter *ratelimiter.Limiter
 }
 
 type Keys struct {
 	Id     string `json:"client_id_bot"`
 	Secret string `json:"client_secret_bot"`
-	OAuth string `json:"oauth"`
+	OAuth string `json:"oauth"error `
 }
+
+//Bot Commands
+const (
+	SWANSON_CMD string = "!swanson"
+	SHUTDOWN_CMD string = "!shutdown"
+)
 
 func (bot *Bot) SetToken() error {
 	f, err := os.Open(".keys.json")
@@ -81,11 +94,17 @@ func (bot *Bot) Start() {
 	if err != nil {
 		panic(err)
 	}
-
+	defer bot.WatchChat()
+	bot.setLimiters()
 	bot.Connect()
+	bot.JoinChannel()
+}
 
-	go bot.JoinChannel()
-	go bot.WatchChat()
+func (bot *Bot) setLimiters() {
+	bot.ChannelLimiter = &ratelimiter.Limiter{}
+	bot.WhisperLimiter = &ratelimiter.Limiter{}
+	bot.ChannelLimiter.Start(time.Duration(1.5 * float64(time.Second.Nanoseconds())), 20)
+	bot.WhisperLimiter.Start(time.Duration(time.Second.Nanoseconds()), 3)
 }
 
 func (bot *Bot) Connect() {
@@ -112,19 +131,19 @@ func (bot *Bot) Disconnect() {
 }
 
 func (bot *Bot) JoinChannel() {
-	logger.Log("joining #" + bot.Channel)
+	logger.Log("joining d" + bot.Channel)
 	bot.conn.Write([]byte("PASS " + bot.Token + "\r\n"))
 	bot.conn.Write([]byte("NICK " + bot.Name + "\r\n"))
 	bot.conn.Write([]byte("CAP REQ :twitch.tv/commands\r\n"))
-	//bot.conn.Write([]byte("CAP REQ :twitch.tv/tags\r\n"))
 	bot.conn.Write([]byte("JOIN #" + bot.Channel + "\r\n"))
 
 
-	logger.Log(fmt.Sprintf("joined #%s as @%s", bot.Channel, bot.Name))
+	logger.Log(fmt.Sprintf("joined %s as #%s", bot.Channel, bot.Name))
 }
 
 func (bot *Bot) Say(msg string) error {
-	logger.Log("attempting to say")
+	bot.ChannelLimiter.GetToken()
+
 	if msg == "" {
 		return errors.New("must provide a message to Say")
 	}
@@ -137,8 +156,10 @@ func (bot *Bot) Say(msg string) error {
 	return nil
 }
 
+// Whispering requires your oauth token to be a verified bot by twitter
 func (bot *Bot) Whisper(username string, msg string) error {
-	logger.Log("attempting to whisper")
+	bot.WhisperLimiter.GetToken()
+
 	if msg == "" || username == "" {
 		return errors.New("must provide both a message and user to Whisper")
 	}
@@ -147,21 +168,21 @@ func (bot *Bot) Whisper(username string, msg string) error {
 	if err != nil {
 		return err
 	}
-	logger.Log(fmt.Sprintf("%s: @%s %s", bot.Name, username, msg))
+	logger.Log(fmt.Sprintf("#%s: @%s %s", bot.Name, username, msg))
 	return nil
 }
 
-// Regex for parsing PRIVMSG strings.
-//
-// First matched group is the user's name and the second matched group is the content of the
-// user's message.
-var msgRegex *regexp.Regexp = regexp.MustCompile(`^:(\w+)!\w+@\w+\.tmi\.twitch\.tv (PRIVMSG) #\w+(?: :(.*))?$`)
+func (bot *Bot) HandlePing() error {
+	logger.Log("#Twitch: PING")
+	_, err := bot.conn.Write([]byte("PONG :tmi.twitch.tv\r\n"))
+	if err != nil {
+		logger.Log("Ping Error")
+		logger.Log(err.Error())
+	}
 
-// Regex for parsing user commands, from already parsed PRIVMSG strings.
-//
-// First matched group is the command name and the second matched group is the argument for the
-// command.
-var cmdRegex *regexp.Regexp = regexp.MustCompile(`^!(\w+)\s?(\w+)?`)
+	logger.Log(fmt.Sprintf("#%s: PONG", bot.Name))
+	return nil
+}
 
 func (bot *Bot) WatchChat() {
 	logger.Log("watching " + bot.Channel)
@@ -172,6 +193,24 @@ func (bot *Bot) WatchChat() {
 			logger.Log(err.Error())
 		}
 	}
+}
+
+func (bot *Bot) ChatSwanson() {
+	quote, err := swanson.GetQuote()
+	if err != nil {
+		logger.Log(err.Error())
+	}
+
+	bot.Say(quote)
+}
+
+func (bot *Bot) WhisperSwanson(name string) {
+	quote, err := swanson.GetQuote()
+	if err != nil {
+		logger.Log(err.Error())
+	}
+
+	bot.Whisper(name, quote)
 }
 
 func (bot *Bot) HandleChat() error {
@@ -185,43 +224,54 @@ func (bot *Bot) HandleChat() error {
 			return errors.New("channel read failed")
 		}
 
-		logger.Log(line)
+		msg, err := ParseMessage(line)
+		if err != nil {
+			return err
+		}
 
-		if line == "PING: :time.twitch.tv" {
-			bot.conn.Write([]byte("PONG :tmi.twitch.tv\r\n"))
-			logger.Log("PONG")
-			continue
-		} else {
-			msgParts := msgRegex.FindStringSubmatch(line)
-			if msgParts != nil {
-				username := msgParts[1]
-				msgType := msgParts[2]
+		switch msg.Type {
+		case PRIVMSG:
+			logger.Log(fmt.Sprintf("#%s: %s", msg.Name, msg.Payload))
 
-				switch msgType {
-				case "PRIVMSG":
-					msg := msgParts[3]
-					logger.Log(username + ": " + msg) 
+		case WHISPER:
+			logger.Log(fmt.Sprintf("#%s (whisper): %s", msg.Name, msg.Payload))
 
-					cmdMatches := cmdRegex.FindStringSubmatch(msg)
-					if cmdMatches != nil {
-						cmd := cmdMatches[1]
-						//arg := cmdMatches[2]
+		case PING:
+			go bot.HandlePing()
 
-						if username == bot.Channel {
-							switch cmd {
-							case "tbdown":
-								logger.Log("shutdown command recieved")
-								bot.Disconnect()
-								return nil
-							default:
-								// nadda
-							}
-						}
-					}
-				default:
-					// nadda
-				}
+		case NOTICE:
+			logger.Log("#Twitch (Notice): " + msg.Payload)
+
+		case CHATCOMMAND:
+			logger.Log(fmt.Sprintf("#%s: %s", msg.Name, msg.Payload))
+			switch msg.Payload {
+			case SWANSON_CMD:
+				go bot.ChatSwanson()
+
+			case SHUTDOWN_CMD:
+				logger.Log("Shutdown Command recieved, signing off")
+				bot.Disconnect()
+				
+			default:
+				logger.Log(fmt.Sprintf("#%s: %s", msg.Name, msg.Payload))
 			}
+
+		case WHISPERCOMMAND:
+			logger.Log(fmt.Sprintf("#%s (whisper): %s", msg.Name, msg.Payload))
+			switch msg.Payload {
+			case SWANSON_CMD:
+				go bot.WhisperSwanson(msg.Name)
+
+			case SHUTDOWN_CMD:
+				logger.Log("Shutdown Command recieved, signing off")
+				bot.Disconnect()
+
+			default:
+				logger.Log(fmt.Sprintf("#%s (whisper): %s", msg.Name, msg.Payload))
+			}
+		default:
+			logger.Log("Unknown message format received")
+			logger.Log(msg.Payload)
 		}
 		time.Sleep(bot.MsgRate)
 	}
