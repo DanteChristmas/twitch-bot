@@ -35,13 +35,13 @@ type TwitchBot interface {
 type Bot struct {
 	Channel string
 	//Holds our tcp connection to twitch
-	conn net.Conn
-	Token string
-	Keys *Keys
-	Name string
-	Port string
+	conn        net.Conn
+	Token       string
+	Keys        *Keys
+	Name        string
+	Port        string
 	PrivatePath string
-	Server string
+	Server      string
 
 	ChannelLimiter *ratelimiter.Limiter
 	WhisperLimiter *ratelimiter.Limiter
@@ -49,7 +49,7 @@ type Bot struct {
 
 //Bot Connection Retry config
 const (
-	CONN_MAX_ATTEMPTS int = 10
+	CONN_MAX_ATTEMPTS   int = 10
 	CONN_RETRY_INTERVAL int = 2
 )
 
