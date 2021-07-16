@@ -11,14 +11,14 @@ import (
 	"os"
 	"time"
 
-	"dchristmas.com/twitch-bot/lib/logger"
-	"dchristmas.com/twitch-bot/lib/ratelimiter"
-	"dchristmas.com/twitch-bot/lib/swanson"
+	"dchristmas.com/twitch-bot/pkg/logger"
+	"dchristmas.com/twitch-bot/pkg/ratelimiter"
+	"dchristmas.com/twitch-bot/pkg/swanson"
 )
 
-
 type TwitchBot interface {
-	Connect()
+	Connect() bool
+	Reconnect()
 	Disconnect()
 	HandleChat() error
 	WatchChat()
@@ -33,48 +33,41 @@ type TwitchBot interface {
 }
 
 type Bot struct {
-	//chat channel
 	Channel string
-
 	//Holds our tcp connection to twitch
 	conn net.Conn
-
-	//Our connection OAuth token
 	Token string
-
 	Keys *Keys
-	//https://dev.twitch.tv/docs/irc#irc-command-and-message-limits
-	MsgRate time.Duration
-	//the bots name
 	Name string
-
-	//irc port
 	Port string
-	//path to oauth creds
 	PrivatePath string
-	//IRC Domain
 	Server string
 
 	ChannelLimiter *ratelimiter.Limiter
 	WhisperLimiter *ratelimiter.Limiter
 }
 
+//Bot Connection Retry config
+const (
+	CONN_MAX_ATTEMPTS int = 10
+	CONN_RETRY_INTERVAL int = 2
+)
+
 type Keys struct {
 	Id     string `json:"client_id_bot"`
 	Secret string `json:"client_secret_bot"`
-	OAuth string `json:"oauth"error `
+	OAuth  string `json:"oauth"error `
 }
 
 //Bot Commands
 const (
-	SWANSON_CMD string = "!swanson"
+	SWANSON_CMD  string = "!swanson"
 	SHUTDOWN_CMD string = "!shutdown"
 )
 
 func (bot *Bot) SetToken() error {
 	f, err := os.Open(".keys.json")
 	if err != nil {
-		logger.Log("FATAL: filed to open keys files")
 		return err
 	}
 
@@ -94,35 +87,47 @@ func (bot *Bot) Start() {
 	if err != nil {
 		panic(err)
 	}
-	defer bot.WatchChat()
-	bot.setLimiters()
-	bot.Connect()
-	bot.JoinChannel()
+	if bot.Reconnect() {
+		bot.setLimiters()
+		bot.JoinChannel()
+	}
 }
 
 func (bot *Bot) setLimiters() {
 	bot.ChannelLimiter = &ratelimiter.Limiter{}
 	bot.WhisperLimiter = &ratelimiter.Limiter{}
-	bot.ChannelLimiter.Start(time.Duration(1.5 * float64(time.Second.Nanoseconds())), 20)
+	bot.ChannelLimiter.Start(time.Duration(1.5*float64(time.Second.Nanoseconds())), 20)
 	bot.WhisperLimiter.Start(time.Duration(time.Second.Nanoseconds()), 3)
 }
 
-func (bot *Bot) Connect() {
+func (bot *Bot) Reconnect() bool {
+	for i := 0; i < CONN_MAX_ATTEMPTS; i++ {
+		time.Sleep(time.Duration(i * CONN_RETRY_INTERVAL * int(time.Second)))
+		if bot.Connect() {
+			return true
+		}
+		i++
+	}
+	logger.Log("failed to connect to Twitch IRC, shutting down")
+	return false
+}
+
+func (bot *Bot) Connect() bool {
 	var err error
-	logger.Log(fmt.Sprintf("attempting to contect to %s on port %s", bot.Server, bot.Port))
+	logger.Log(fmt.Sprintf("attempting to connect to %s on port %s", bot.Server, bot.Port))
 
 	conf := &tls.Config{}
-	dialer := &net.Dialer{}
+	dialer := &net.Dialer{Timeout: 1 * time.Second}
 	bot.conn, err = tls.DialWithDialer(dialer, "tcp", bot.Server+":"+bot.Port, conf)
 	if err != nil {
-		//TODO: retry should be incremental - https://dev.twitch.tv/docs/irc/guide
 		logger.Log(err.Error())
 		logger.Log("Connection failed, retrying")
 
-		bot.Connect()
-		return
+		return false
 	}
+
 	logger.Log("Connected to " + bot.Server)
+	return true
 }
 
 func (bot *Bot) Disconnect() {
@@ -137,7 +142,7 @@ func (bot *Bot) JoinChannel() {
 	bot.conn.Write([]byte("CAP REQ :twitch.tv/commands\r\n"))
 	bot.conn.Write([]byte("JOIN #" + bot.Channel + "\r\n"))
 
-
+	defer bot.WatchChat()
 	logger.Log(fmt.Sprintf("joined %s as #%s", bot.Channel, bot.Name))
 }
 
@@ -152,7 +157,7 @@ func (bot *Bot) Say(msg string) error {
 	if err != nil {
 		return err
 	}
-	logger.Log(bot.Name + ": " + msg)  
+	logger.Log(bot.Name + ": " + msg)
 	return nil
 }
 
@@ -186,12 +191,11 @@ func (bot *Bot) HandlePing() error {
 
 func (bot *Bot) WatchChat() {
 	logger.Log("watching " + bot.Channel)
-	for {
-		err := bot.HandleChat()
-		if err != nil {
-			logger.Log("FATAL: Handle Chat Error") 
-			logger.Log(err.Error())
-		}
+
+	err := bot.HandleChat()
+	if err != nil {
+		logger.Log("FATAL: Handle Chat Error")
+		logger.Log(err.Error())
 	}
 }
 
@@ -251,7 +255,8 @@ func (bot *Bot) HandleChat() error {
 			case SHUTDOWN_CMD:
 				logger.Log("Shutdown Command recieved, signing off")
 				bot.Disconnect()
-				
+				return nil
+
 			default:
 				logger.Log(fmt.Sprintf("#%s: %s", msg.Name, msg.Payload))
 			}
@@ -265,6 +270,7 @@ func (bot *Bot) HandleChat() error {
 			case SHUTDOWN_CMD:
 				logger.Log("Shutdown Command recieved, signing off")
 				bot.Disconnect()
+				return nil
 
 			default:
 				logger.Log(fmt.Sprintf("#%s (whisper): %s", msg.Name, msg.Payload))
@@ -273,6 +279,5 @@ func (bot *Bot) HandleChat() error {
 			logger.Log("Unknown message format received")
 			logger.Log(msg.Payload)
 		}
-		time.Sleep(bot.MsgRate)
 	}
 }

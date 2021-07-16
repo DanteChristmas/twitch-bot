@@ -7,22 +7,22 @@ import (
 )
 
 type IRCType int
+
 const (
 	//Handle messages we haven't accounted for
-	UNKNOWN IRCType=-1
-	PRIVMSG IRCType=0
-	PING IRCType=1
-	NOTICE IRCType=2
-	WHISPER IRCType=3
-	
-	CHATCOMMAND IRCType=4
-	WHISPERCOMMAND IRCType=5
-)
+	UNKNOWN IRCType = -1
+	PRIVMSG IRCType = 0
+	PING    IRCType = 1
+	NOTICE  IRCType = 2
+	WHISPER IRCType = 3
 
+	CHATCOMMAND    IRCType = 4
+	WHISPERCOMMAND IRCType = 5
+)
 
 const (
 	PRIVMSG_STR string = "PRIVMSG"
-	NOTICE_STR string = "NOTICE"
+	NOTICE_STR  string = "NOTICE"
 	WHISPER_STR string = "WHISPER"
 )
 
@@ -30,12 +30,11 @@ const PING_MESSAGE = "PING :tmi.twitch.tv"
 
 type Message struct {
 	Payload string
-	Name string
-	Type IRCType
+	Name    string
+	Type    IRCType
 }
 
 // Regex for parsing standard IRC message strings.
-//var msgRegex *regexp.Regexp = regexp.MustCompile(`^:(\w+)!\w+@\w+\.tmi\.twitch\.tv ([A-Z]*) #\w+(?: :(.*))?$`)
 var msgRegex *regexp.Regexp = regexp.MustCompile(`^:(\w+)!\w+@\w+\.tmi\.twitch\.tv (PRIVMSG|NOTICE) #\w+(?: :(.*))?$`)
 var whisperRegex *regexp.Regexp = regexp.MustCompile(`^:(\w+)!\w+@\w+\.tmi\.twitch\.tv (WHISPER) \w+(?: :(.*))?$`)
 
@@ -46,7 +45,7 @@ func ParseMessage(line string) (*Message, error) {
 	if line == PING_MESSAGE {
 		return &Message{
 			Payload: "",
-			Type: PING,
+			Type:    PING,
 		}, nil
 	}
 
@@ -67,15 +66,15 @@ func ParseMessage(line string) (*Message, error) {
 		if cmdPayload != nil {
 			return &Message{
 				Payload: cmdPayload[0],
-				Type: CHATCOMMAND,
-				Name: chatParts[1],
+				Type:    CHATCOMMAND,
+				Name:    chatParts[1],
 			}, nil
 		}
 
 		return &Message{
 			Payload: chatParts[3],
-			Name: chatParts[1],
-			Type: PRIVMSG,
+			Name:    chatParts[1],
+			Type:    PRIVMSG,
 		}, nil
 
 	case NOTICE_STR:
@@ -83,11 +82,11 @@ func ParseMessage(line string) (*Message, error) {
 		if noticeParts == nil {
 			return nil, errors.New("chat parse error")
 		}
-		
+
 		return &Message{
 			Payload: noticeParts[3],
-			Name: "Twitch",
-			Type: PRIVMSG,
+			Name:    "Twitch",
+			Type:    PRIVMSG,
 		}, nil
 
 	case WHISPER_STR:
@@ -100,21 +99,21 @@ func ParseMessage(line string) (*Message, error) {
 		if cmdPayload != nil {
 			return &Message{
 				Payload: cmdPayload[0],
-				Type: WHISPERCOMMAND,
-				Name: chatParts[1],
+				Type:    WHISPERCOMMAND,
+				Name:    chatParts[1],
 			}, nil
 		}
 
 		return &Message{
 			Payload: chatParts[3],
-			Name: chatParts[1],
-			Type: WHISPER,
+			Name:    chatParts[1],
+			Type:    WHISPER,
 		}, nil
 
-	default: 
+	default:
 		return &Message{
 			Payload: line,
-			Type: UNKNOWN,
+			Type:    UNKNOWN,
 		}, nil
 	}
 }

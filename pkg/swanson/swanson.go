@@ -10,6 +10,9 @@ import (
 
 func GetQuote() (string, error) {
 	res, err := http.Get("https://ron-swanson-quotes.herokuapp.com/v2/quotes")
+	if err != nil {
+		return "", errors.New("swawnson api read error")
+	}
 	defer res.Body.Close()
 
 	var result []string

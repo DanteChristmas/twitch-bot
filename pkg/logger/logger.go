@@ -12,5 +12,5 @@ func timeStamp() string {
 }
 
 func Log(msg string) {
-	fmt.Printf("|%s| %s\n", timeStamp(), msg) 
+	fmt.Printf("|%s| %s\n", timeStamp(), msg)
 }

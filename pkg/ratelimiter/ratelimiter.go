@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-
 type RateLimiter interface {
-	Start(fillRate time.Duration, capacity int) 
+	Start(fillRate time.Duration, capacity int)
 	GetToken() bool
 	fillBucket()
 	startFill()
@@ -16,19 +15,19 @@ type RateLimiter interface {
 type Limiter struct {
 	capacity int
 	fillRate time.Duration
-	tokens int	
-	mu sync.Mutex
+	tokens   int
+	mu       sync.Mutex
 }
 
-func (limiter *Limiter)Start(fillRate time.Duration, capacity int) *Limiter {
+func (limiter *Limiter) Start(fillRate time.Duration, capacity int) *Limiter {
 	limiter.capacity = capacity
 	limiter.tokens = capacity
-	limiter.fillRate = fillRate	
+	limiter.fillRate = fillRate
 	go limiter.startFill()
 	return limiter
 }
 
-func (limiter *Limiter)GetToken() bool {
+func (limiter *Limiter) GetToken() bool {
 	for limiter.getTokenCount() < 1 {
 		time.Sleep(limiter.fillRate)
 	}
@@ -39,20 +38,20 @@ func (limiter *Limiter)GetToken() bool {
 	return true
 }
 
-func (limiter *Limiter)getTokenCount() int {
+func (limiter *Limiter) getTokenCount() int {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 	return limiter.tokens
 }
 
-func (limiter *Limiter)startFill() {
+func (limiter *Limiter) startFill() {
 	for {
 		time.Sleep(limiter.fillRate)
 		limiter.fillBucket()
 	}
 }
 
-func (limiter *Limiter)fillBucket() {
+func (limiter *Limiter) fillBucket() {
 	limiter.mu.Lock()
 	if limiter.tokens < limiter.capacity {
 		limiter.tokens++
